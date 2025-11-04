@@ -1,4 +1,4 @@
-python-telegram-bot[job-queue]==22.5
+python-telegram-bot[webhooks,job-queue]==22.5
 requests
 beautifulsoup4
 flask
