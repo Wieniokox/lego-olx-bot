@@ -7,10 +7,11 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from flask import Flask
 
 # Pobieramy token z zmiennej środowiskowej BOT_TOKEN
-TOKEN = os.getenv("8204866609:AAEH3iZqii8n6Wlc3KmmuihH2gCKcvCXpn0")
+TOKEN = os.getenv("BOT_TOKEN")
 if not TOKEN:
     print("ERROR: BOT_TOKEN environment variable is not set. Exiting.")
     sys.exit(1)
+
 
 SEARCH_URL = "https://www.olx.pl/oferty/q-lego-kg/"
 seen_links = set()
