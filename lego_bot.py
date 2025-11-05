@@ -15,6 +15,7 @@ if not TOKEN:
 
 SEARCH_URL = "https://www.olx.pl/oferty/q-lego-kg/?search%5Bfilter_float_price%3Afrom%5D=1000"
 SEEN_FILE = "seen_links.json"
+
 app = Flask(__name__)
 application = Application.builder().token(TOKEN).build()
 
@@ -72,7 +73,7 @@ async def send_new_offers(context: ContextTypes.DEFAULT_TYPE):
     for title, price, location, link in offers:
         if link not in seen_links:
             seen_links.add(link)
-            save_seen_links()  # zapis po każdej nowej ofercie
+            save_seen_links()
             msg = f"🧱 *{title}*\n💰 {price}\n📍 {location}\n🔗 [Zobacz ofertę]({link})"
             await context.bot.send_message(chat_id=context.job.chat_id, text=msg, parse_mode="Markdown", disable_web_page_preview=True)
             new_count += 1
@@ -82,6 +83,7 @@ async def send_new_offers(context: ContextTypes.DEFAULT_TYPE):
 # --- Komendy ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Bot LEGO KG (od 1000 zł, cała Polska) aktywowany!")
+    # Job queue: sprawdzanie co godzinę
     context.job_queue.run_repeating(send_new_offers, interval=3600, first=5, chat_id=update.effective_chat.id)
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -103,6 +105,7 @@ application.add_handler(CommandHandler("check", check))
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
+    print(f"📥 Otrzymano webhook: {data}")  # log dla debugowania
     update = Update.de_json(data, application.bot)
     application.update_queue.put_nowait(update)
     return "ok"
@@ -113,7 +116,8 @@ def home():
 
 # --- Start aplikacji ---
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))  # automatyczny port Render
     webhook_url = f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}"
     application.bot.set_webhook(webhook_url)
     print(f"Webhook ustawiony: {webhook_url}")
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+    app.run(host="0.0.0.0", port=port)
