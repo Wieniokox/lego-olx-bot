@@ -1,29 +1,17 @@
-import os
-import sys
-import threading
-import requests
+from flask import Flask, request
+from telegram import Update, Bot
+from telegram.ext import Application, CommandHandler, ContextTypes, Dispatcher
+import os, asyncio, requests, re
 from bs4 import BeautifulSoup
-from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
-from flask import Flask
-import re
 
 TOKEN = os.getenv("BOT_TOKEN")
-if not TOKEN:
-    print("❌ ERROR: BOT_TOKEN environment variable is not set.")
-    sys.exit(1)
+bot = Bot(TOKEN)
+app = Flask(__name__)
+dispatcher = Dispatcher(bot, None, workers=0, use_context=True)
 
-SEARCH_URL = "https://www.olx.pl/oferty/q-lego-kg/?search%5Bfilter_float_price%3Afrom%5D=1000"
 seen_links = set()
+SEARCH_URL = "https://www.olx.pl/oferty/q-lego-kg/?search%5Bfilter_float_price%3Afrom%5D=1000"
 
-# --- Flask serwer (Render wymaga otwartego portu) ---
-flask_app = Flask(__name__)
-
-@flask_app.route("/")
-def home():
-    return "✅ LEGO KG Bot działa na Render!"
-
-# --- Funkcja pobierająca oferty z OLX ---
 async def fetch_offers():
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
@@ -35,7 +23,6 @@ async def fetch_offers():
 
     soup = BeautifulSoup(r.text, "html.parser")
     offers = []
-
     for offer in soup.select("div[data-cy='l-card']"):
         link_tag = offer.find("a", href=True)
         title_tag = offer.find("h6")
@@ -55,24 +42,13 @@ async def fetch_offers():
             if price_value < 1000:
                 continue
         offers.append((title, f"{price_value} zł", location, link))
-    print(f"✅ Znaleziono {len(offers)} ofert.")
     return offers
 
-async def send_new_offers(context: ContextTypes.DEFAULT_TYPE):
-    offers = await fetch_offers()
-    bot = context.bot
-    for title, price, location, link in offers:
-        if link not in seen_links:
-            seen_links.add(link)
-            msg = f"🧱 *{title}*\n💰 {price}\n📍 {location}\n🔗 [Zobacz ofertę]({link})"
-            await bot.send_message(chat_id=context.job.chat_id, text=msg, parse_mode="Markdown", disable_web_page_preview=True)
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Bot LEGO KG (od 1000 zł, cała Polska) aktywowany!")
-    context.job_queue.run_repeating(send_new_offers, interval=3600, first=5, chat_id=update.effective_chat.id)
+    await update.message.reply_text("✅ Bot LEGO KG aktywowany!")
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Sprawdzam oferty LEGO KG (od 1000 zł)...")
+    await update.message.reply_text("🔍 Sprawdzam oferty LEGO KG...")
     offers = await fetch_offers()
     if not offers:
         await update.message.reply_text("⚠️ Brak ofert lub OLX chwilowo niedostępny.")
@@ -81,12 +57,20 @@ async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg = f"🧱 *{title}*\n💰 {price}\n📍 {location}\n🔗 [Zobacz ofertę]({link})"
             await update.message.reply_text(msg, parse_mode="Markdown", disable_web_page_preview=True)
 
-def run_bot():
-    app = Application.builder().token(TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("check", check))
-    app.run_polling()
+dispatcher.add_handler(CommandHandler("start", start))
+dispatcher.add_handler(CommandHandler("check", check))
+
+@app.route(f"/{TOKEN}", methods=["POST"])
+def webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot)
+    asyncio.run(dispatcher.process_update(update))
+    return "ok"
+
+@app.route("/")
+def home():
+    return "✅ LEGO KG Bot działa!"
 
 if __name__ == "__main__":
-    threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))).start()
-    run_bot()
+    bot.set_webhook(f"https://{os.environ.get('RENDER_EXTERNAL_HOSTNAME')}/{TOKEN}")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
