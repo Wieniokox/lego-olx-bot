@@ -5,6 +5,7 @@ from bs4 import BeautifulSoup
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 import asyncio
+import re
 
 # Pobranie tokena z Render (zmienna środowiskowa)
 TOKEN = os.getenv("BOT_TOKEN")
@@ -12,11 +13,12 @@ if not TOKEN:
     print("ERROR: BOT_TOKEN environment variable is not set. Exiting.")
     sys.exit(1)
 
-SEARCH_URL = "https://www.olx.pl/oferty/q-lego-kg/"
+# Szukamy „lego kg” z całej Polski, bez lokalnych filtrów
+SEARCH_URL = "https://www.olx.pl/oferty/q-lego-kg/?search%5Bfilter_float_price%3Afrom%5D=1000"
 seen_links = set()
 
 async def fetch_offers():
-    """Pobiera oferty z OLX"""
+    """Pobiera oferty z OLX (cena >= 1000 zł)"""
     r = requests.get(SEARCH_URL, headers={"User-Agent": "Mozilla/5.0"})
     soup = BeautifulSoup(r.text, "html.parser")
     offers = []
@@ -27,18 +29,29 @@ async def fetch_offers():
         price_tag = offer.find("p", {"data-testid": "ad-price"})
         location_tag = offer.find("p", {"data-testid": "location-date"})
 
-        if not link_tag or not title_tag:
+        if not link_tag or not title_tag or not price_tag:
             continue
 
+        # Link
         link = link_tag["href"]
         if link.startswith("/"):
             link = "https://www.olx.pl" + link
 
+        # Tytuł, cena, lokalizacja
         title = title_tag.get_text(strip=True)
-        price = price_tag.get_text(strip=True) if price_tag else "brak ceny"
+        price_text = price_tag.get_text(strip=True)
         location = location_tag.get_text(strip=True) if location_tag else "brak lokalizacji"
 
-        offers.append((title, price, location, link))
+        # Odczytaj cenę liczbę
+        price_match = re.search(r"(\d[\d\s]*)", price_text)
+        if price_match:
+            price_value = int(price_match.group(1).replace(" ", ""))
+            if price_value < 1000:
+                continue  # pomiń tańsze oferty
+        else:
+            continue
+
+        offers.append((title, f"{price_value} zł", location, link))
 
     return offers
 
@@ -55,15 +68,15 @@ async def send_new_offers(context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Aktywuje bota"""
-    await update.message.reply_text("✅ Bot LEGO KG aktywowany! Będzie sprawdzał oferty co godzinę 🧱")
+    await update.message.reply_text("✅ Bot LEGO KG (od 1000 zł, cała Polska) aktywowany! 🧱")
     context.job_queue.run_repeating(send_new_offers, interval=3600, first=5, chat_id=update.effective_chat.id)
 
 async def check(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Ręczne sprawdzenie ofert"""
-    await update.message.reply_text("🔍 Sprawdzam oferty LEGO KG...")
+    await update.message.reply_text("🔍 Sprawdzam oferty LEGO KG (od 1000 zł)...")
     offers = await fetch_offers()
     if not offers:
-        await update.message.reply_text("❌ Nie znaleziono żadnych ofert.")
+        await update.message.reply_text("❌ Nie znaleziono żadnych ofert spełniających kryteria.")
     else:
         for title, price, location, link in offers[:5]:  # wysyła max 5 ofert
             msg = f"🧱 *{title}*\n💰 {price}\n📍 {location}\n🔗 [Zobacz ofertę]({link})"
